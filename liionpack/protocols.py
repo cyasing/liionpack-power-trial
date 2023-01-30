@@ -20,7 +20,7 @@ def generate_protocol_from_experiment(experiment, flatten=True):
     """
     protocol = []
     for i, op in enumerate(experiment.operating_conditions):
-        op["Terminal voltage [V]"][0] = 3 * 2 # initilising with "nominal voltage"
+        # op["Terminal voltage [V]"][0] = 3 * 2 # initilising with "nominal voltage"
         proto = []
         t = op["time"]
         dt = op["period"]
