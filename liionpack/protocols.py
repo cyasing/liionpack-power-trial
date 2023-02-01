@@ -4,7 +4,7 @@
 #
 
 import numpy as np
-
+import pybamm
 
 def generate_protocol_from_experiment(experiment, flatten=True):
     """
@@ -36,20 +36,23 @@ def generate_protocol_from_experiment(experiment, flatten=True):
                 I = op["Current input [A]"]
                 V = op["Terminal voltage [V]"]
 
+                P_applied = pybamm.FunctionParameter("Power function [W]", {"Time [s]": pybamm.t * self.param.timescale})
+                # Check how to access Functionparameter values
                 #V = 3.9
-                if t == 0:
+                
+                for i in t:
+                    if t == 0:
+                        V[0] = 4.14826818 # V first entry from single cell sim
+                        I[0] = -7.00360444e-21 # I first entry from single cell sim
                     P = V * I
-                    V[0] = P[0]/I[0]
-                for i in t[1:end]:
-                    I[i] = P[i]/V[i-1]
                 proto.extend([I] * int(t / dt))
                 if i == 0:
                     # Include initial state when not drive cycle, first op
                     proto = [proto[0]] + proto
-            # elif "dc_data" in op.keys():
-            #     dc_data = op["dc_data"]
-                
-            #     proto.extend(dc_data_I[:, 1].tolist())
+            elif "dc_data" in op.keys():
+                 dc_data = op["dc_data"]
+                 dc_data_I = dc_data/4.14826818
+                 proto.extend(dc_data_I[:, 1].tolist())
                     
         # if typ not in ["current"]:
         #     raise ValueError("Only constant current operations are supported")
