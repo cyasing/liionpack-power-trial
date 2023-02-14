@@ -29,35 +29,45 @@ def generate_protocol_from_experiment(experiment, flatten=True):
         #     raise ValueError("Time must be an integer multiple of the period")
 
         typ = op["type"]
-        if typ == "power":
-            if "Power input [W]" in op.keys():
+        #if typ == "power":
+        #    if "Power input [W]" in op.keys():
                 
-                P = op["Power input [W]"]
-                I = op["Current input [A]"]
-                V = op["Terminal voltage [V]"]
+        #        P = op["Power input [W]"]
+        #        I = op["Current input [A]"]
+        #        V = op["Terminal voltage [V]"]
 
-                P_applied = pybamm.FunctionParameter("Power function [W]", {"Time [s]": pybamm.t * self.param.timescale})
-                # Check how to access Functionparameter values
-                #V = 3.9
+        #        P_applied = pybamm.FunctionParameter("Power function [W]", {"Time [s]": pybamm.t * self.param.timescale})
+        #        # Check how to access Functionparameter values
+        #        #V = 3.9
                 
-                for i in t:
-                    if t == 0:
-                        V[0] = 4.14826818 # V first entry from single cell sim
-                        I[0] = -7.00360444e-21 # I first entry from single cell sim
-                    P = V * I
-                proto.extend([I] * int(t / dt))
-                if i == 0:
-                    # Include initial state when not drive cycle, first op
-                    proto = [proto[0]] + proto
-            elif "dc_data" in op.keys():
-                 dc_data = op["dc_data"]
-                 dc_data_I = dc_data/4.14826818
-                 proto.extend(dc_data_I[:, 1].tolist())
+        #        for i in t:
+        #            if t == 0:
+        #                V[0] = 4.14826818 # V first entry from single cell sim
+        #                I[0] = -7.00360444e-21 # I first entry from single cell sim
+        #            P = V * I
+        #        proto.extend([I] * int(t / dt))
+        #        if i == 0:
+        #            # Include initial state when not drive cycle, first op
+        #            proto = [proto[0]] + proto
+        #    elif "dc_data" in op.keys():
+        #         dc_data = op["dc_data"]
+        #         dc_data_I = dc_data/4.14826818
+        #         proto.extend(dc_data_I[:, 1].tolist())
                     
-        # if typ not in ["current"]:
-        #     raise ValueError("Only constant current operations are supported")
+        # if typ not in ["current", "power"]:
+        #     raise ValueError("Only current and power operation modes are supported")
         # else:
-        if typ in ["current"]:
+        if typ in ["current", "power"]:
+            if typ == "power":
+                if "Power input [W]" in op.keys():
+                    P = op["Power input [W]"]
+                    proto.extend([P] * int(t / dt))
+                    if i == 0:
+                        # Include initial state when not drive cycle, first op
+                        proto = [proto[0]] + proto
+                elif "dc_data" in op.keys():
+                    dc_data = op["dc_data"]
+                    proto.extend(dc_data[:, 1].tolist())
             if typ == "current":
                 if "Current input [A]" in op.keys():
                     I = op["Current input [A]"]
@@ -74,7 +84,10 @@ def generate_protocol_from_experiment(experiment, flatten=True):
         else:
             protocol.append(proto)
 
-    return protocol
+        Nsteps = len(protocol)
+
+
+    return protocol, typ
 '''
         def external_circuit_function(variables):
             I = variables["Current [A]"]

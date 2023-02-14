@@ -1,6 +1,7 @@
 #
 # Solvers
 #
+from casadi.casadi import OP_ACOS
 import liionpack as lp
 from liionpack.solver_utils import _create_casadi_objects as cco
 from liionpack.solver_utils import _serial_step as ss
@@ -301,8 +302,13 @@ class GenericManager:
         self.netlist = netlist
         self.sim_func = sim_func
 
+        # Generate the protocol from the supplied experiment
+        self.protocol, op_type = lp.generate_protocol_from_experiment(experiment, flatten=True)
         self.parameter_values = parameter_values
-        self.check_current_function()
+        if op_type == "current":
+            self.check_current_function()
+        elif op_type == "power":
+            self.check_power_function()
         # Get netlist indices for resistors, voltage sources, current sources
         self.Ri_map = netlist["desc"].str.find("Ri") > -1
         self.V_map = netlist["desc"].str.find("V") > -1
@@ -312,11 +318,18 @@ class GenericManager:
 
         self.split_models(self.Nspm, nproc)
 
-        # Generate the protocol from the supplied experiment
-        self.protocol = lp.generate_protocol_from_experiment(experiment, flatten=True)
         self.dt = experiment.period
         self.Nsteps = len(self.protocol)
-        netlist.loc[self.I_map, ("value")] = self.protocol[0]
+        ########################################################################################
+        # Initialize conversion from power to current here:
+        if op_type == "power":
+            V_nominal = 3.7 # need a parameter value entry
+            P_init = self.protocol[0]
+            i_init = P_init/V_nominal
+            netlist.loc[self.I_map, ("value")] = i_init
+            ########################################################################################
+        else:
+            netlist.loc[self.I_map, ("value")] = self.protocol[0]
         # Solve the circuit to initialise the electrochemical models
         V_node, I_batt = lp.solve_circuit_vectorized(netlist)
 
@@ -359,10 +372,12 @@ class GenericManager:
         # Get the initial state of the system
         self.evaluate_actors()
         if not setup_only:
-            self._step_solve_step(None)
+            self._step_solve_step(op_type)
             return self.step_output()
-
-    def _step_solve_step(self, updated_inputs):
+        ################################################################################
+        # Added op_type in function definition (_step_solve_step and _step)
+        ################################################################################
+    def _step_solve_step(self, updated_inputs, op_type):
         tic = ticker.time()
         # Do stepping
         lp.logger.notice("Starting step solve")
@@ -370,7 +385,7 @@ class GenericManager:
         with tqdm(total=self.Nsteps, desc="Stepping simulation") as pbar:
             step = 0
             while step < self.Nsteps and vlims_ok:
-                vlims_ok = self._step(step, updated_inputs)
+                vlims_ok = self._step(step, updated_inputs, op_type)
                 if vlims_ok:
                     step += 1
                     pbar.update(1)
@@ -398,7 +413,10 @@ class GenericManager:
             self.all_output[self.variable_names[j]] = self.output[j, : self.step + 1, :]
         return self.all_output
 
-    def _step(self, step, updated_inputs):
+    ############################################################################################
+    # Edited op_type here
+    ############################################################################################
+    def _step(self, step, updated_inputs, op_type):
         vlims_ok = True
         # 01 Calculate whether resting or restarting
         self.resting = (
@@ -422,10 +440,24 @@ class GenericManager:
         # 04 Update netlist
         self.netlist.loc[self.V_map, ("value")] = temp_ocv
         self.netlist.loc[self.Ri_map, ("value")] = self.temp_Ri
-        self.netlist.loc[self.I_map, ("value")] = self.protocol[step]
+        ############################################################################
+        # Update Power here:
+
+        if op_type == "power":
+            if step in (0, 1):
+                V_nominal = 3.7 # need a parameter value entry
+                i_init = self.protocol[0]/V_nominal
+                self.netlist.loc[self.I_map, ("value")] = i_init
+            else:
+                i_step = self.protocol[step]/self.V_terminal[step-1]
+                self.netlist.loc[self.I_map, ("value")] = i_step
+        else:
+            self.netlist.loc[self.I_map, ("value")] = self.protocol[step]
+        ############################################################################
+
         lp.power_loss(self.netlist)
         # 05 Solve the circuit with updated netlist
-        if step <= self.Nsteps:
+        if step > 0 and step <= self.Nsteps:
             V_node, I_batt = lp.solve_circuit_vectorized(self.netlist)
             self.record_times[step] = step * self.dt
             self.V_terminal[step] = V_node[self.Terminal_Node][0]
@@ -454,6 +486,14 @@ class GenericManager:
             self.parameter_values.update({"Current function [A]": "[input]"})
             lp.logger.notice(
                 "Parameter: Current function [A] has been set to " + "input"
+            )
+
+    def check_power_function(self):
+        p_func = self.parameter_values["Power function [W]"]
+        if p_func.__class__ is not pybamm.InputParameter:
+            self.parameter_values.update({"Power function [W]": "[input]"})
+            lp.logger.notice(
+                "Parameter: Power function [W] has been set to " + "input"
             )
 
     def actor_i_app(self, index):
